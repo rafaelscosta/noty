@@ -1,0 +1,45 @@
+name: DESIGN.md official package export
+
+on:
+  push:
+    branches:
+      - tmp/designmd-official-package-20260819
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Pack and verify pinned package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle
+          npm pack @google/design.md@0.4.0 --pack-destination bundle
+          sha256sum bundle/*.tgz > bundle/CHECKSUMS.sha256
+          tar -xzf bundle/*.tgz -C bundle
+          node --input-type=module <<'NODE'
+          import {readFile, writeFile} from 'node:fs/promises';
+          const pkg = JSON.parse(await readFile('bundle/package/package.json', 'utf8'));
+          if (pkg.name !== '@google/design.md' || pkg.version !== '0.4.0') throw new Error(`unexpected ${pkg.name}@${pkg.version}`);
+          const mod = await import('./bundle/package/dist/linter/index.js');
+          const report = mod.lint('---\nname: Smoke\ncolors:\n  primary: "#000000"\n---\n\n## Overview\nSmoke');
+          if (!report || !report.designSystem || !report.summary) throw new Error('invalid lint report');
+          await writeFile('bundle/PACKAGE-VERIFICATION.json', JSON.stringify({name: pkg.name, version: pkg.version, exports: pkg.exports, smokeSummary: report.summary}, null, 2) + '\n');
+          NODE
+          rm -rf bundle/package
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-design-md-0.4.0-package
+          path: bundle
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 1
